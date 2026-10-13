@@ -4,9 +4,9 @@
 
 이전 Sim-to-Real 텔레오퍼레이션 프로젝트의 **MuJoCo 기구학/동역학 모델(`hand.xml`, `scene.xml`)과 실물 Dynamixel 모터 드라이버(`motors.py`)를 재사용**하되, 목표는 완전히 다릅니다 — 카메라나 실시간 입력 없이, 노래 **"Heartbeat"**(2PM, 135 BPM)의 안무를 분석해 **규칙 기반 시간표**로 미리 계산하고, 오디오 재생 위치 하나만을 마스터 클럭으로 삼아 로봇 손이 박자에 맞춰 움직이도록 합니다.
 
-| MuJoCo 시뮬레이션 (안무 재생) |
+| MuJoCo 시뮬레이션 & 실물 로봇 손 안무 시연 (YouTube) |
 | :---: |
-| <img src="docs/mujoco.gif" alt="tri_hand MuJoCo 시뮬레이션 데모" width="100%"> |
+| <a href="https://youtu.be/2_KnKuTeGbY"><img src="https://img.youtube.com/vi/2_KnKuTeGbY/maxresdefault.jpg" alt="tri_hand Heartbeat 안무 시연 영상" width="100%"></a> |
 
 > 안무 영상을 토대로 `motions.json`/`schedule.json`에 손 동작으로 옮겨 적었고, 재생은 오직 `grid.json`의 비트 격자 수식으로만 이뤄집니다. 근거는 [docs/heartbeat/choreography.md](docs/heartbeat/choreography.md) 참조.
 
