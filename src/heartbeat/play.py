@@ -23,6 +23,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 import mujoco
 import numpy as np
 
+import motors
 from heartbeat.choreo import END, START, choreo
 from heartbeat.grid import BAR_PERIOD, bar_beat_to_time, time_to_bar_beat
 from heartbeat.schedule import (FIRST_BAR, LAST_BAR, PREROLL, PREROLL_SETTLE,
@@ -35,7 +36,9 @@ AUDIO = Path(__file__).resolve().parents[2] / "docs" / "heartbeat" / "Heartbeat.
 # --- 보정 상수 (측정해서 채우는 값) -------------------------------------------
 # --headless 스윕으로 측정한 값. 0→0.140 / 0.03→0.062 / 0.05→0.027 / 0.08→0.083 rad
 LEAD = 0.050          # s. 위치 제어기(kp=12, kv=0.5) 추종 지연 보정
+MOTORS_LEAD = 0.050   # s. 실물 Dynamixel 모터 추종 지연 보정
 AUDIO_OFFSET = 0.0    # s. 음원 재생 지연 보정. 손이 늦으면 음수로 (Phase 5)
+
 # 영상↔음원 정렬: mp3_t = video_t + 0.966 s. motions.json의 영상 시각 주석은 이 값을 쓴 것.
 VIDEO_OFFSET = 0.966
 
@@ -101,24 +104,46 @@ def preroll_to_start(model, data, seconds: float = PREROLL,
 
 
 def _preroll_in_viewer(model, data, viewer, seconds: float = PREROLL,
-                       settle: float = PREROLL_SETTLE) -> None:
+                       settle: float = PREROLL_SETTLE, hand=None) -> None:
     """뷰어를 돌리면서 실시간으로 프리롤. 음원은 이 함수가 끝난 뒤에 시작한다."""
     print(f"프리롤 {seconds:.1f}s — 누운 시작 자세로 이동 중…")
     dt = model.opt.timestep
     t0 = time.perf_counter()
+    last_motor = 0.0
     while viewer.is_running():
         elapsed = time.perf_counter() - t0
         if elapsed >= seconds + settle:
             break
-        for joint, q_des in preroll_pose(elapsed, seconds).items():
+        pose = preroll_pose(elapsed, seconds)
+        for joint, q_des in pose.items():
             data.ctrl[model.actuator(f"{joint}_act").id] = q_des
+        if hand and (elapsed - last_motor >= 0.02):
+            hand.send(pose)
+            last_motor = elapsed
         for _ in range(MAX_CATCHUP_STEPS):
             if data.time >= elapsed:
                 break
             mujoco.mj_step(model, data)
         viewer.sync()
         time.sleep(dt)
+    if hand:
+        hand.send(choreo(START))
     data.time = 0.0                           # 본 재생은 t=START부터 센다
+
+
+def _preroll_motors_only(hand, seconds: float = PREROLL,
+                         settle: float = PREROLL_SETTLE) -> None:
+    """뷰어 없이 실물 모터만 단독 프리롤."""
+    print(f"프리롤 {seconds:.1f}s — 누운 시작 자세로 이동 중…")
+    t0 = time.perf_counter()
+    while True:
+        elapsed = time.perf_counter() - t0
+        if elapsed >= seconds + settle:
+            break
+        hand.send(preroll_pose(elapsed, seconds))
+        time.sleep(0.02)
+    hand.send(choreo(START))
+
 
 
 def _bar_label(bar: int) -> str:
@@ -181,8 +206,9 @@ def run_headless(model, data, lead: float = LEAD) -> None:
 
 
 # ------------------------------------------------------------------- 뷰어
-def run_viewer(model, data, clock, lead: float = LEAD) -> None:
-    """마스터 클럭(음원 재생 위치)을 따라가며 뷰어를 돌린다."""
+def run_viewer(model, data, clock, lead: float = LEAD,
+               hand=None, motors_lead: float = MOTORS_LEAD) -> None:
+    """마스터 클럭(음원 재생 위치)을 따라가며 뷰어를 돌린다 (hand 지정 시 실물 동시 구동)."""
     import atexit
     import threading
     import glfw
@@ -200,7 +226,7 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
         v.cam.fixedcamid = model.camera("iso").id
         # 음원을 틀기 전에 눈에 보이게 누운 자세로 옮긴다. 뷰어가 이미 떠 있으므로
         # 관객(과 실물 옆의 사람)이 손이 자리를 잡는 것을 보고 나서 음악이 시작된다.
-        _preroll_in_viewer(model, data, v)
+        _preroll_in_viewer(model, data, v, hand=hand)
         if not v.is_running():
             return
         try:
@@ -212,6 +238,7 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
             clock.start()
             clock_started = True
         bar = 0
+        last_motor = 0.0
         while v.is_running():
             t = clock.t
             if t >= END:
@@ -229,6 +256,12 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
                         break
                     apply_ctrl(model, data, START + data.time + lead)
                     mujoco.mj_step(model, data)
+
+            # 실물 모터 동시 제어 (50 Hz 주기 동기화)
+            if hand and (t - last_motor >= 0.02):
+                hand.send(choreo(t + motors_lead))
+                last_motor = t
+
             v.sync()
 
             cur_bar = time_to_bar_beat(t)[0]
@@ -244,6 +277,8 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
                 mujoco.mj_step(model, data)
                 v.sync()
                 time.sleep(model.opt.timestep)
+        if hand:
+            hand.send(choreo(END))
 
     except KeyboardInterrupt:
         interrupted = True
@@ -273,6 +308,47 @@ def run_viewer(model, data, clock, lead: float = LEAD) -> None:
         print("\n재생 종료 — 중립 자세로 복귀했습니다.")
 
 
+def run_motors_only(hand, clock, lead: float = MOTORS_LEAD) -> None:
+    """뷰어 없이 오디오 마스터 클럭에 맞춰 실물 모터만 구동."""
+    _preroll_motors_only(hand)
+    clock_started = False
+    try:
+        clock.start()
+        clock_started = True
+    except Exception as e:
+        print(f"  ⚠ 오디오 스트림을 시작할 수 없어 무음으로 전환합니다: {e}", file=sys.stderr)
+        from heartbeat.audio import SilentClock
+        clock = SilentClock(offset=getattr(clock, "offset", 0.0), stop_at=getattr(clock, "stop_at", None))
+        clock.start()
+        clock_started = True
+
+    bar = 0
+    print("▶ 실물 로봇 손 비트 재생 시작 (50 Hz SyncWrite)\n")
+    try:
+        while True:
+            t = clock.t
+            if t >= END:
+                break
+            hand.send(choreo(t + lead))
+            cur_bar = time_to_bar_beat(t)[0]
+            if cur_bar != bar and t >= START:
+                bar = cur_bar
+                print(f"  마디 {bar:3d}  {t:6.2f}s  {_bar_label(bar)}")
+            time.sleep(0.02)   # 50 Hz 제어
+        # 종료 복귀
+        hand.send(choreo(END))
+        time.sleep(0.5)
+        print("\n재생 종료 — 중립 자세로 복귀했습니다.")
+    except KeyboardInterrupt:
+        print("\n  ⚠ 사용자에 의해 재생이 중단되었습니다.")
+    finally:
+        if clock_started:
+            try:
+                clock.stop()
+            except Exception:
+                pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Heartbeat 비트 연출 재생")
     ap.add_argument("--headless", action="store_true",
@@ -283,6 +359,17 @@ def main(argv=None) -> int:
     ap.add_argument("--lead", type=float, default=LEAD, help="추종 지연 보정(s)")
     ap.add_argument("--offset", type=float, default=AUDIO_OFFSET,
                     help="음원 지연 보정(s). 손이 늦게 움직이면 음수로")
+    # 실물 모터 옵션
+    ap.add_argument("--motors", action="store_true",
+                    help="실물 Dynamixel 모터 연동 구동")
+    ap.add_argument("--port", default=None,
+                    help="모터 직렬 포트 (기본: motors.json 또는 자동 감지)")
+    ap.add_argument("--motors-config", type=Path, default=motors.CONFIG,
+                    help="모터 설정 파일 경로 (기본: src/motors.json)")
+    ap.add_argument("--motors-lead", type=float, default=MOTORS_LEAD,
+                    help="실물 모터 추종 지연 보정(s)")
+    ap.add_argument("--no-viewer", action="store_true",
+                    help="뷰어 GUI 없이 실행 (--motors 전용)")
     args = ap.parse_args(argv)
 
     validate_all(verbose=True)
@@ -307,8 +394,19 @@ def main(argv=None) -> int:
     print(f"\n▶ 재생: 마디 {FIRST_BAR}~{LAST_BAR}  "
           f"(음원 {START:.2f}~{END:.2f}s = 영상 {START-VIDEO_OFFSET:.2f}~{END-VIDEO_OFFSET:.2f}s), "
           f"1마디 {BAR_PERIOD:.3f}s\n")
+
     try:
-        run_viewer(model, data, clock, lead=args.lead)
+        if args.motors:
+            print(f"[실물 모터 초기화] 설정 파일: {args.motors_config}")
+            hand = motors.load(args.motors_config, max_speed=3.0, port=args.port)
+            with hand:
+                print(f"[실물 모터 연결 완료] 포트: {hand.bus.port.port_name}\n")
+                if args.no_viewer:
+                    run_motors_only(hand, clock, lead=args.motors_lead)
+                else:
+                    run_viewer(model, data, clock, lead=args.lead, hand=hand, motors_lead=args.motors_lead)
+        else:
+            run_viewer(model, data, clock, lead=args.lead)
     except KeyboardInterrupt:
         return 0
     return 0
@@ -319,4 +417,5 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except KeyboardInterrupt:
         raise SystemExit(0)
+
 

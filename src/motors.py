@@ -16,9 +16,11 @@
   - 종료·예외 시 토크 끔
 """
 import argparse
+import glob
 import json
 import math
 import sys
+import time
 from pathlib import Path
 
 from dynamixel_sdk import COMM_RX_TIMEOUT, COMM_SUCCESS, GroupSyncRead, GroupSyncWrite, PacketHandler, PortHandler
@@ -27,10 +29,38 @@ from serial import SerialException
 from run_sim import CLOSE_SIGN, Q_CLOSE, Q_OPEN, YAW_LIMIT
 
 CONFIG = Path(__file__).with_name("motors.json")
-DEFAULT_PORT = "/dev/tty.usbserial-FTBIN9LO"
-DEFAULT_BAUD = 1000000   # 실물 손 모터 7개(ID 1~7)의 설정값. 2026-10-09 ping으로 확인
+DEFAULT_PORT = "COM3" if sys.platform == "win32" else "/dev/tty.usbserial-FTBIN9LO"
+DEFAULT_BAUD = 1000000   # 실물 손 모터 7개(ID 1~7)의 설정값
 BAUDRATES = [1000000, 57600, 115200, 2000000, 3000000, 4000000, 9600, 4500000]   # XL430/XM430 설정 가능 값
 JOINT_NAMES = ["A_j0", "A_j1", "A_j2", "B_j1", "B_j2", "C_j1", "C_j2"]
+PORT_PATTERNS = ["/dev/tty.usbserial-*", "/dev/ttyUSB*"]
+
+
+def find_ports() -> list[str]:
+    """연결된 U2D2/직렬 포트 목록 검색 (Windows 레지스트리 및 POSIX dev)"""
+    ports = [p for pat in PORT_PATTERNS for p in glob.glob(pat)]
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM")
+            for i in range(winreg.QueryInfoKey(key)[1]):
+                ports.append(winreg.EnumValue(key, i)[1])
+        except (OSError, FileNotFoundError):
+            pass
+    return sorted(ports)
+
+
+def pick_port(*candidates: str | None) -> str:
+    """후보군 중 존재하는 첫 포트 선택, 없으면 자동 검색된 첫 포트 반환"""
+    for c in candidates:
+        if c:
+            return c
+    ports = find_ports()
+    if not ports:
+        hint = "Windows 장치 관리자의 '포트 (COM & LPT)' 확인" if sys.platform == "win32" else "USB 연결 확인"
+        raise SystemExit(f"U2D2 포트를 찾지 못함: {hint} (--port 로 포트 직접 지정 가능)")
+    return ports[0]
+
 
 # XL430/XM430 공통 Control Table (Protocol 2.0): (주소, 바이트 수)
 OPERATING_MODE = (11, 1)
@@ -194,12 +224,15 @@ def read_config(path: Path) -> dict:
         raise SystemExit(f"{path} 없음. 먼저 python motors.py calibrate")
 
 
-def load(path: Path, max_speed: float) -> HandMotors:
-    """path가 "try"면 보정 없이 시험용 배정"""
+def load(path: Path = CONFIG, max_speed: float = 3.0, port: str | None = None) -> HandMotors:
+    """path가 "try"면 보정 없이 시험용 배정, 기본은 motors.json 로드"""
     if str(path) == "try":
-        return try_hand(Bus(DEFAULT_PORT, DEFAULT_BAUD), max_speed)
+        p = pick_port(port, DEFAULT_PORT)
+        return try_hand(Bus(p, DEFAULT_BAUD), max_speed)
     cfg = read_config(path)
-    return HandMotors(Bus(cfg["port"], cfg["baud"]), cfg["joints"], max_speed)
+    baud = cfg.get("baud", cfg.get("baudrate", DEFAULT_BAUD))
+    p = pick_port(port, cfg.get("port"), DEFAULT_PORT)
+    return HandMotors(Bus(p, baud), cfg["joints"], max_speed)
 
 
 def try_hand(bus, max_speed: float) -> HandMotors:
@@ -232,8 +265,9 @@ def motor_sign(name: str, close_delta: int) -> int:
     return (1 if close_delta > 0 else -1) * int(CLOSE_SIGN[finger])
 
 
-def calibrate(port: str, baud: int, path: Path):
-    bus = Bus(port, baud)
+def calibrate(port: str | None, baud: int, path: Path):
+    p = pick_port(port, DEFAULT_PORT)
+    bus = Bus(p, baud)
     try:
         found = bus.ping()
         if not found:
@@ -271,25 +305,34 @@ def calibrate(port: str, baud: int, path: Path):
                 taken.add(i)
                 print(f"[{name}] → ID {i} (이동 {delta:+d} 틱, sign {sign:+d})")
                 break
-        path.write_text(json.dumps({"port": port, "baud": baud, "joints": joints}, indent=2), encoding="utf-8")
+        path.write_text(json.dumps({"port": p, "baud": baud, "joints": joints}, indent=2), encoding="utf-8")
         print(f"\n저장: {path}. 배정 안 된 모터: {sorted(set(ids) - taken)}")
     finally:
         bus.close()
 
 
-def check(path: Path):
-    """토크를 끈 채로 관절 각도를 계속 출력. Ctrl+C로 종료"""
+def check(path: Path, port: str | None = None):
+    """토크를 끈 채로 관절 각도를 계속 출력. 손으로 움직여 부호 확인 (Ctrl+C로 종료)"""
     cfg = read_config(path)
-    bus = Bus(cfg["port"], cfg["baud"])
+    baud = cfg.get("baud", cfg.get("baudrate", DEFAULT_BAUD))
+    p = pick_port(port, cfg.get("port"), DEFAULT_PORT)
+    print(f"연결 포트: {p}, 보레이트: {baud} bps")
+    bus = Bus(p, baud)
     try:
         ids = [c["id"] for c in cfg["joints"].values()]
+        print(f"모터 토크 해제 중... 대상 ID: {ids}")
         for i in ids:
             bus.write(i, TORQUE_ENABLE, 0)
+        print("Ctrl+C로 종료. 손으로 관절을 움직여 각도(rad)와 부호를 확인하세요:\n")
+        names = list(cfg["joints"].keys())
         while True:
             raw = bus.positions(ids)
-            print("  ".join(f"{n} {to_rad(c, raw[c['id']]):+.2f}" for n, c in cfg["joints"].items()), end="\r")
+            parts = [f"{n:4s}: {to_rad(cfg['joints'][n], raw[cfg['joints'][n]['id']]):+5.2f}rad"
+                     for n in names if cfg['joints'][n]['id'] in raw]
+            print("  ".join(parts), end="\r", flush=True)
+            time.sleep(0.05)
     except KeyboardInterrupt:
-        print()
+        print("\n체크 종료.")
     finally:
         bus.close()
 
@@ -297,11 +340,12 @@ def check(path: Path):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["calibrate", "check"])
-    ap.add_argument("--port", default=DEFAULT_PORT)
+    ap.add_argument("--port", default=None, help="직렬 포트 (기본: 자동 감지 또는 COM3)")
     ap.add_argument("--baud", type=int, default=DEFAULT_BAUD)
     ap.add_argument("--config", type=Path, default=CONFIG)
     args = ap.parse_args()
     if args.command == "calibrate":
         calibrate(args.port, args.baud, args.config)
     else:
-        check(args.config)
+        check(args.config, args.port)
+
