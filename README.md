@@ -169,22 +169,26 @@ pip install -r requirements.txt -r requirements-analysis.txt
 
 ---
 
-## 🤖 실물 로봇 손 연동 (`motors.py`)
+## 🤖 실물 로봇 손 연동 (`motors.py` / `play.py --motors`)
 
-`src/motors.py`는 이전 프로젝트에서 쓰던 실물 Dynamixel(XL430-W250-T, Protocol 2.0, 위치 제어) 드라이버를 그대로 재사용합니다. **Heartbeat 재생을 실물로 이식하는 작업(Phase 6)은 아직 미착수**이며, 현재는 캘리브레이션/수동 점검 기능만 제공합니다.
+`src/motors.py`는 실물 Dynamixel(XL430-W250-T, Protocol 2.0, 위치 제어) 드라이버를 통해 음원 박자에 맞춰 7개 모터를 구동합니다. `tri-hand` 프로젝트에서 검증된 모터 ID, 회전 방향, 영점(zero tick) 값이 `src/motors.json`에 완비되어 있어 바로 구동할 수 있습니다.
 
 ```bash
-# 토크를 끈 채로 손으로 관절을 움직여 motors.json 작성
-python src/motors.py calibrate --port COM3 --baud 1000000
+# 1) 토크를 끈 채로 손으로 관절을 움직여 각도(rad) 및 부호 확인
+python src/motors.py check --port COM3
 
-# 토크 끈 채로 현재 관절 각도(rad)를 실시간 출력 (부호 확인용)
-python src/motors.py check --config src/motors.json
+# 2) 음원 + MuJoCo 뷰어 + 실물 로봇 손 동시 구동 (화면과 실물이 완벽 동기화)
+python src/heartbeat/play.py --motors --port COM3
+
+# 3) 화면 뷰어 없이 음악 + 실물 로봇 손만 구동
+python src/heartbeat/play.py --motors --no-viewer --port COM3
 ```
 
-- 영점/방향 추측 없이 손으로 직접 움직여 기록합니다: `raw(틱) = zero + sign × q(rad) × 4096/2π`.
-- 목표는 항상 안전 범위(`safe_range`: 바깥쪽 `Q_OPEN` ~ 오므림 `Q_CLOSE`, `A_j0`는 ±`YAW_LIMIT`)로 잘라서 전송되고, 이동 속도는 Profile Velocity로 3.0 rad/s 이하로 제한됩니다.
-- 모터 보레이트를 모를 때는 `calibrate`가 전 보레이트(57600~4000000)를 자동 스캔합니다.
-- 향후 `play.py --motors` 추가 시 박 경계마다 `choreo(next_beat)`를 Time-based Profile로 Sync Write하는 방식이 계획되어 있습니다(`MOTORS_LEAD` 상수 측정 필요). 자세한 계획은 [docs/heartbeat/implementation-plan.md](docs/heartbeat/implementation-plan.md) Phase 6 참조.
+- **사전 안전 검증**: 실행 전 `validate_all()`이 동작 속도(3.0 rad/s 이하)와 가동 범위를 자동 전수 검증합니다.
+- **부드러운 프리롤**: 음원 재생 전 3초 동안 조립 자세(0 rad)에서 누운 시작 자세로 서서히 이동하여 모터 급가속을 원천 차단합니다.
+- **실시간 비트 동기화**: `AudioClock`의 음원 재생 시각에 맞춰 50 Hz 주기로 7개 모터에 GroupSyncWrite로 목표 각도를 전송합니다.
+- **안전 종료**: `Ctrl+C` 또는 재생 완료 시 즉시 모든 모터의 토크를 해제하고 중립 복귀합니다.
+
 
 ---
 
