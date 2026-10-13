@@ -33,10 +33,10 @@ choreo.py        choreo(t) → 7관절 목표 각도(rad)   ★ Sim/실물 공�
    ├─▶ validate.py   재생 전 안전 범위·속도 상한·격자 정렬·길이 자동 검증
    │
    ▼
-play.py          AudioClock(재생 샘플 수 기준)을 마스터 클럭으로 MuJoCo 뷰어 구동
+play.py          AudioClock(재생 샘플 수 기준)을 마스터 클럭으로 MuJoCo 뷰어 및 실물 모터 구동
    │
-   ├─▶ MuJoCo (run_sim.py의 scene.xml / hand.xml)   ← 현재 구현 범위
-   └─▶ motors.py (실물 Dynamixel)                    ← Phase 6, 미착수
+   ├─▶ MuJoCo (run_sim.py의 scene.xml / hand.xml)   ← 뷰어 시각화 / 헤드리스 수치 검증
+   └─▶ motors.py (실물 Dynamixel, motors.json)       ← --motors 실시간 비트 동기화
 ```
 
 ---
@@ -54,7 +54,8 @@ play.py          AudioClock(재생 샘플 수 기준)을 마스터 클럭으로 
   - **프리롤 구간**(음원 전 이동)도 조립 자세에서 첫 키프레임까지 속도 상한 안에 드는지 따로 검사합니다(`check_preroll`). 비트 격자 밖이라 시간표 검사가 닿지 않는 구간입니다.
   - 자가 충돌(규칙 5)은 `--headless` 전구간 시뮬레이션에서 바닥 외 접촉을 감지해 확인합니다.
 * **MuJoCo ↔ 실물 공용 로직**
-  - `choreo(t)`는 시뮬레이션과 실물 어느 쪽에서도 똑같이 쓰도록 설계되어 있습니다(Phase 6에서 `motors.py`와 연결 예정).
+  - `choreo(t)`는 시뮬레이션과 실물 어느 쪽에서도 똑같이 쓰도록 설계되어 있습니다 (`--motors` 옵션으로 실물 Dynamixel 모터와 직접 연동).
+
 
 ---
 
@@ -64,12 +65,16 @@ play.py          AudioClock(재생 샘플 수 기준)을 마스터 클럭으로 
 # 1) 음원 + MuJoCo 뷰어로 재생 (기본). 스피커에서 음악이 나오고 손이 박자에 맞춰 움직입니다
 python src/heartbeat/play.py
 
-# 2) 음원·GUI 없이 전구간(45마디) 수치 검증 — 발산/자가 충돌/추종 오차를 수 초 내 확인
+# 2) 음원 + MuJoCo 뷰어 + 실물 로봇 손 동시 구동 (화면과 실물이 완벽 동기화)
+python src/heartbeat/play.py --motors --port COM3
+
+# 3) 음원·GUI 없이 전구간 수치 검증 — 발산/자가 충돌/추종 오차를 수 초 내 확인
 python src/heartbeat/play.py --headless
 
-# 3) 오디오 장치가 없을 때: 뷰어만, 실시간 클럭으로 대체
+# 4) 오디오 장치가 없을 때: 뷰어만, 실시간 클럭으로 대체
 python src/heartbeat/play.py --mute
 ```
+
 
 > macOS GUI 뷰어는 `mjpython`을 써야 합니다. **음원 출력·뷰어·실물 모터는 윈도우 네이티브 환경을 권장**합니다(WSL2는 디스플레이/오디오 드라이버 이슈로 `--headless` 권장).
 
@@ -96,9 +101,11 @@ python src/run_sim.py --headless   # 수치만 확인 (WSL2/서버 등)
 
 | 상수 | 값 | 의미 / 언제 바꾸나 |
 |---|---|---|
-| `LEAD` | 0.050 s | 위치 제어기(kp=12, kv=0.5) 추종 지연 보정. `--headless` 추종 오차가 0.05 rad 넘을 때 `--lead`로 재탐색 |
+| `LEAD` | 0.050 s | MuJoCo 위치 제어기(kp=12, kv=0.5) 추종 지연 보정. `--headless` 추종 오차가 0.05 rad 넘을 때 `--lead`로 재탐색 |
+| `MOTORS_LEAD` | 0.050 s | 실물 Dynamixel 모터 추종 지연 보정. `--motors-lead` 옵션 |
 | `AUDIO_OFFSET` | 0.0 s | **귀로 맞추는 값.** 손이 음악보다 늦으면 음수, 빠르면 양수. `--offset` 옵션 |
 | `VIDEO_OFFSET` | 0.966 s | 영상↔음원 상호상관으로 측정(문서/주석용, 재생에는 미사용) |
+
 
 ### 프리롤 설정 (`schedule.json` → `rules`)
 
@@ -156,7 +163,7 @@ pip install -r requirements.txt
 
 > **주요 설치 패키지 (`requirements.txt`)**:
 > - `mujoco==3.3.0`, `numpy`: 물리 엔진 및 행렬 연산
-> - `dynamixel-sdk`: 실물 Dynamixel 모터 시리얼 통신 (Phase 6용)
+> - `dynamixel-sdk`: 실물 Dynamixel 모터 직렬 통신 (`motors.py` / `--motors` 실물 구동용)
 > - `sounddevice`, `soundfile`: 오디오 재생 마스터 클럭 및 mp3 디코딩 (ffmpeg 불필요)
 >   - *참고 (Linux 환경)*: 음원 출력을 위해 PortAudio 라이브러리가 필요합니다. (`conda install -c conda-forge portaudio` 또는 `sudo apt-get install libportaudio2`). 설치 없이 실행하려면 `--mute` 또는 `--headless` 옵션을 사용합니다.
 > - `pytest`: 유닛 테스트
@@ -189,7 +196,6 @@ python src/heartbeat/play.py --motors --no-viewer --port COM3
 - **실시간 비트 동기화**: `AudioClock`의 음원 재생 시각에 맞춰 50 Hz 주기로 7개 모터에 GroupSyncWrite로 목표 각도를 전송합니다.
 - **안전 종료**: `Ctrl+C` 또는 재생 완료 시 즉시 모든 모터의 토크를 해제하고 중립 복귀합니다.
 
-
 ---
 
 ## ⚙️ 기구학 및 하드웨어 사양 (Kinematics Specs)
@@ -215,13 +221,12 @@ python src/heartbeat/play.py --motors --no-viewer --port COM3
 ## 📁 프로젝트 구조
 
 ```
-tri_hand/
+padak-tri/
 ├── docs/
 │   ├── mujoco.gif              # 시뮬레이션 데모
 │   ├── execution_guide.md      # 실행 가이드
 │   └── heartbeat/
 │       ├── Heartbeat.mp3       # 재생 음원
-│       ├── heartbeat.mp4       # 안무 분석 원본 영상 (실행에는 미사용)
 │       ├── brainstorming.md    # 배경·제약 정리
 │       ├── choreography.md     # 영상 분석 → 모션 매핑 근거
 │       └── implementation-plan.md  # Phase별 구현 계획
@@ -236,7 +241,8 @@ tri_hand/
 │       ├── schedule.json / schedule.py  # 구간 표 및 전역 타임라인
 │       ├── validate.py         # 재생 전 안전성 자동 검증
 │       ├── audio.py            # 오디오 마스터 클럭 (AudioClock / SilentClock)
-│       └── play.py             # 재생 진입점
+│       └── play.py             # 재생 진입점 (시뮬레이션 및 --motors 실물 구동)
+
 ├── tests/                      # pytest 유닛 테스트
 ├── AGENTS.md                   # 에이전트 작업 지침 및 하드웨어 모델링 원칙
 ├── requirements.txt            # 재생에 필요한 의존성
