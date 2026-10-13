@@ -8,22 +8,7 @@
 | :---: |
 | <img src="docs/mujoco.gif" alt="tri_hand MuJoCo 시뮬레이션 데모" width="100%"> |
 
-> 안무의 원본은 [`docs/heartbeat/heartbeat.mp4`](docs/heartbeat/heartbeat.mp4)(0~33초 구간)이며, 영상은 **실행 시에는 전혀 쓰이지 않습니다.** 영상을 사람이 관찰해 `motions.json`/`schedule.json`에 손 동작으로 옮겨 적었고, 재생은 오직 `grid.json`의 비트 격자 수식으로만 이뤄집니다. 근거는 [docs/heartbeat/choreography.md](docs/heartbeat/choreography.md) 참조.
-
----
-
-## 📋 목차
-
-1. [프로젝트 아키텍처](#-프로젝트-아키텍처)
-2. [핵심 기능](#-핵심-기능-key-features)
-3. [빠른 시작](#-빠른-시작-quick-start)
-4. [비트 동기화 재생 (`heartbeat/play.py`)](#-비트-동기화-재생-heartbeatplaypy)
-5. [안무 커스터마이징](#-안무-커스터마이징)
-6. [환경 세팅 (Setup)](#-환경-세팅-setup)
-7. [실물 로봇 손 연동 (`motors.py`)](#-실물-로봇-손-연동-motorspy)
-8. [기구학 및 하드웨어 사양](#️-기구학-및-하드웨어-사양-kinematics-specs)
-9. [프로젝트 구조](#-프로젝트-구조)
-10. [테스트 실행](#-테스트-실행)
+> 안무 영상을 토대로 `motions.json`/`schedule.json`에 손 동작으로 옮겨 적었고, 재생은 오직 `grid.json`의 비트 격자 수식으로만 이뤄집니다. 근거는 [docs/heartbeat/choreography.md](docs/heartbeat/choreography.md) 참조.
 
 ---
 
