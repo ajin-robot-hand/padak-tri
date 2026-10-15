@@ -9,7 +9,7 @@
 [![Tests](https://img.shields.io/badge/tests-64%20passed-success.svg)]()
 [![Status](https://img.shields.io/badge/status-active-success.svg)]()
 
-이전 Sim-to-Real 텔레오퍼레이션 프로젝트의 **MuJoCo 기구학/동역학 모델(`hand.xml`, `scene.xml`)과 실물 Dynamixel 모터 드라이버(`motors.py`)를 재사용**하되, 실시간 센서 입력 대신 노래 **"Heartbeat"**(2PM, 135 BPM)의 안무를 **규칙 기반 시간표(Time-scheduled)**로 사전 계산하고, 오디오 재생 위치를 마스터 클럭으로 삼아 로봇 손이 박자에 맞춰 동작하도록 구성했습니다.
+이전 Sim-to-Real 텔레오퍼레이션 프로젝트의 **MuJoCo 기구학/동역학 모델(`hand.xml`, `scene.xml`)과 실물 Dynamixel 모터 드라이버(`motors.py`)를 재사용**하되, 실시간 센서 입력 대신 노래 **"Heartbeat"**(2PM, 135 BPM)의 안무를 **규칙 기반 시간표(Time-scheduled)** 로 사전 계산하고, 오디오 재생 위치를 마스터 클럭으로 삼아 로봇 손이 박자에 맞춰 동작하도록 구성했습니다.
 
 | 실물 로봇 손 구동 데모 (안무 재생) |
 | :---: |
@@ -211,9 +211,9 @@ pytest tests
 padak-tri/
 ├── docs/                 # 심층 기술 문서 및 실행 가이드
 ├── src/                  # 메인 소스 코드 및 실행 엔트리포인트
-│   ├── heartbeat/play.py # [엔트리포인트] 음원 비트 동기화 안무 재생 (Sim / Real)
-│   ├── run_sim.py        # [엔트리포인트] 독립 MuJoCo 시뮬레이션 데모 (코사인 궤적)
-│   └── motors.py         # [엔트리포인트] 실물 Dynamixel 모터 진단(check) 및 캘리브레이션(calibrate)
+│   ├── heartbeat/play.py # 음원 비트 동기화 안무 재생 (Sim / Real)
+│   ├── run_sim.py        # 독립 MuJoCo 시뮬레이션 데모 (코사인 궤적)
+│   └── motors.py         # 실물 Dynamixel 모터 진단(check) 및 캘리브레이션(calibrate)
 ├── tests/                # 단위 및 통합 테스트 스위트 (pytest)
 └── AGENTS.md             # 에이전트 작업 지침 및 하드웨어 모델링 원칙
 ```
