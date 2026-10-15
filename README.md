@@ -1,6 +1,6 @@
 # padak-tri: 춤추는 로봇손
 
-> **음원 박자에 맞춰 3지 7자유도 다관절 로봇 손의 안무를 재생하는 비트 동기화 제어 프레임워크입니다.**  
+> **음악 비트에 맞춰 3지 7자유도 다관절 로봇 손이 춤추도록 제어하는 프로젝트입니다.**  
 > 오디오 스트림 재생 위치를 단일 마스터 클럭으로 삼아 누적 오차 없이 MuJoCo 물리 시뮬레이션 및 실물 Dynamixel 하드웨어를 동기화합니다.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -9,7 +9,7 @@
 [![Tests](https://img.shields.io/badge/tests-64%20passed-success.svg)]()
 [![Status](https://img.shields.io/badge/status-active-success.svg)]()
 
-이전 Sim-to-Real 텔레오퍼레이션 프로젝트의 **MuJoCo 기구학/동역학 모델(`hand.xml`, `scene.xml`)과 실물 Dynamixel 모터 드라이버(`motors.py`)를 재사용**하되, 실시간 센서 입력 대신 노래 **"Heartbeat"**(2PM, 135 BPM)의 안무를 **규칙 기반 시간표(Time-scheduled)** 로 사전 계산하고, 오디오 재생 위치를 마스터 클럭으로 삼아 로봇 손이 박자에 맞춰 동작하도록 구성했습니다.
+이전 Sim-to-Real 텔레오퍼레이션 프로젝트인 [`tri_hand`](https://github.com/ajin-robot-hand/tri_hand)의 **MuJoCo 기구학/동역학 모델(`hand.xml`, `scene.xml`)과 실물 Dynamixel 모터 드라이버(`motors.py`)를 재사용**하되, 실시간 센서 입력 대신 노래 **"Heartbeat"**(2PM, 135 BPM)의 안무를 **규칙 기반 시간표(Time-scheduled)** 로 사전 계산하고, 오디오 재생 위치를 마스터 클럭으로 삼아 로봇 손이 박자에 맞춰 동작하도록 구성했습니다.
 
 | 실물 로봇 손 구동 데모 (안무 재생) |
 | :---: |
@@ -71,7 +71,7 @@ uv pip install -r requirements.txt
 python src/heartbeat/play.py
 ```
 
-1. **안무 재생 구간**: 분석 완료된 마디 1~19(음원 0.42~34.20 s)를 재생합니다.
+1. **안무 재생 구간**: 분석 완료된 마디 1\~19(음원 0.42\~34.20 s)를 재생합니다.
 2. **동작 종료**: 실행 중 터미널에서 `Ctrl + C` 또는 뷰어 창에서 `q` 키를 누르면 안전하게 종료됩니다.
 
 ---

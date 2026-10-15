@@ -206,7 +206,7 @@ curl -X POST http://localhost:8000/reset
 
 ### 3.3 음원 동기 비트 연출 (`heartbeat/play.py`)
 `docs/heartbeat/Heartbeat.mp3`를 재생하면서, 영상(`heartbeat.mp4`) 0~33초 구간의 안무를 옮긴
-모션을 135 BPM 박자에 맞춰 시뮬레이션에서 재생합니다. 재생 범위는 **마디 1~19 (음원 0.42~34.20 s)** 입니다.
+모션을 135 BPM 박자에 맞춰 시뮬레이션에서 재생합니다. 재생 범위는 **마디 1\~19 (음원 0.42\~34.20 s)** 입니다.
 
 안무를 어떻게 읽어 모션으로 옮겼는지는 [heartbeat/choreography.md](heartbeat/choreography.md) 참조.
 
