@@ -1,12 +1,12 @@
-# tri_hand 프로젝트 실행 및 운영 가이드 (Execution Guide)
+# padak-tri 프로젝트 실행 및 운영 가이드 (Execution Guide)
 
-이 문서는 `tri_hand` 프로젝트의 `src/` 디렉토리에 포함된 모든 실행 스크립트(`run_sim.py`, `server.py`, `motors.py`, `teleop.py`)의 구동 방법, 파이프라인 연계 및 하드웨어 제어 과정을 정리한 종합 가이드입니다.
+이 문서는 `padak-tri` 프로젝트의 전체 시스템 아키텍처, 세부 모듈 구성 및 실행 스크립트(`play.py`, `run_sim.py`, `motors.py`)의 구동 방법, 파이프라인 연계 및 하드웨어 제어 과정을 정리한 종합 가이드입니다.
 
 ---
 
 ## 📋 목차
 1. [사전 준비 및 환경 설정](#1-사전-준비-및-환경-설정)
-2. [전체 시스템 아키텍처 및 스크립트 역할](#2-전체-시스템-아키텍처-및-스크립트-역할)
+2. [아키텍처 및 모듈 구성](#2-아키텍처-및-모듈-구성-architecture--module-specifications)
 3. [가상 시뮬레이션 실행](#3-가상-시뮬레이션-실행)
    - [3.1 독립 시뮬레이션 데모 (`run_sim.py`)](#31-독립-시뮬레이션-데모-run_simpy)
    - [3.2 HTTP 제어 서버 및 웹 대시보드 (`server.py`)](#32-http-제어-서버-및-웹-대시보드-serverpy)
@@ -62,29 +62,85 @@ pip install -r requirements.txt
 
 ---
 
-## 2. 전체 시스템 아키텍처 및 스크립트 역할
+## 2. 아키텍처 및 모듈 구성 (Architecture & Module Specifications)
 
-`src/` 디렉토리의 파일들은 모듈형으로 유기적으로 연결되어 있습니다:
+`padak-tri` 시스템은 음원 박자(BPM 135)를 마스터 클럭으로 삼아 3지 7자유도 다관절 로봇 손의 안무를 정밀 재생하도록 설계된 비트 동기화 제어 프레임워크입니다.
+전체 소스코드는 계층별 단일 책임 원칙에 따라 유기적으로 연결되어 있으며, MuJoCo 물리 시뮬레이션과 실물 Dynamixel 모터가 동일한 `choreo(t)` 순수 함수를 공유합니다.
 
+### 2.1 시스템 데이터 파이프라인
+
+```mermaid
+%%{init: {'flowchart': {'curve': 'linear'}}}%%
+flowchart TD
+    subgraph Presentation ["1. 스케줄링 및 모션 정의 계층"]
+        GridDef["비트 격자 정의 (grid.json)<br/>BPM 135 · 첫 박 · 마디 수"]
+        MotionLib["모션 라이브러리 (motions.json / schedule.json)<br/>키프레임 정규화 오므림량 (-1~+1)"]
+    end
+
+    subgraph Service_Core ["2. 핵심 비즈니스 / 동기화 및 기구학 계층"]
+        AudioClock["오디오 마스터 클럭 (audio.py)<br/>PortAudio DAC 시각 기반 무누적 동기화"]
+        ChoreoFunc["순수 함수 choreo(t)<br/>음원 시각(t) ➔ 7관절 목표 각도(rad)"]
+        Validator["자동 안전성 검증기 (validate.py)<br/>관절 속도(3.0 rad/s) · 가동 범위 · 격자 정렬 전수 검증"]
+        AudioClock --> ChoreoFunc
+        GridDef --> ChoreoFunc
+        MotionLib --> ChoreoFunc
+        ChoreoFunc --> Validator
+    end
+
+    subgraph Backend_Hardware ["3. 물리 실행 계층 (Sim / Real)"]
+        MuJoCoSim["MuJoCo 시뮬레이터 (play.py / run_sim.py)<br/>scene.xml / hand.xml"]
+        Dynamixel["실물 모터 제어 (motors.py)<br/>Robotis XL430-W250-T 7관절"]
+        Validator --> MuJoCoSim
+        Validator --> Dynamixel
+    end
 ```
-[웹캠 / 영상] ──(cv2 / MediaPipe)──> [ teleop.py ]
-                                         │
-                   ┌─────────────────────┴─────────────────────┐
-                   ▼                                           ▼
-          HTTP POST (/joints)                         Serial (Protocol 2.0)
-                   │                                           │
-                   ▼                                           ▼
-       [ server.py ] (포트 8000)                       [ motors.py ]
-       ├── MuJoCo 물리 시뮬레이션                        └── U2D2 / XL430 모터 (실물)
-       └── dashboard.html (웹 대시보드)
-```
 
-| 스크립트 파일 | 역할 | 주요 입출력 |
+### 2.2 사용자 실행 엔트리포인트 (Entrypoints)
+
+사용자가 CLI 터미널에서 직접 실행할 수 있는 핵심 엔트리포인트 스크립트 목록입니다:
+
+| 스크립트 경로 | 실행 명령어 예시 | 역할 및 주요 옵션 |
 |---|---|---|
-| [`run_sim.py`](file:///home/erdos/workspace/tri-hand/src/run_sim.py) | 단독 시뮬레이션 데모 | MuJoCo 내장 주기적 궤적 생성 → 물리 엔진 구동 |
-| [`server.py`](file:///home/erdos/workspace/tri-hand/src/server.py) | HTTP 제어 서버 & 웹 대시보드 | REST API 수신 (`POST /joints`) → 시뮬레이션 반영 |
-| [`teleop.py`](file:///home/erdos/workspace/tri-hand/src/teleop.py) | 비전 손 추적 원격 조종 | 웹캠 영상 → 사람 손 관절 각도 계산 → 서버 / 모터 전송 |
-| [`motors.py`](file:///home/erdos/workspace/tri-hand/src/motors.py) | 실물 모터 캘리브레이션/제어 | 관절 각도(rad) ↔ 모터 엔코더(tick) 변환 및 U2D2 통신 |
+| [`src/heartbeat/play.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/play.py) | `python src/heartbeat/play.py`<br/>`python src/heartbeat/play.py --headless`<br/>`python src/heartbeat/play.py --motors --port COM3` | **[메인 엔트리포인트]** 음원 재생과 동시에 MuJoCo 시뮬레이션 및 실물 Dynamixel 손의 비트 동기화 안무를 구동. `--headless`, `--mute`, `--motors`, `--lead`, `--offset` 지원. |
+| [`src/run_sim.py`](file:///home/borlee/assignment/pakak-tri/src/run_sim.py) | `python src/run_sim.py`<br/>`python src/run_sim.py --headless` | **[시뮬레이션 엔트리포인트]** 안무 없이 내장 코사인 궤적으로 7개 관절을 주기적으로 오므리고 펴는 독립 기구학 데모. |
+| [`src/motors.py`](file:///home/borlee/assignment/pakak-tri/src/motors.py) | `python src/motors.py check --port COM3`<br/>`python src/motors.py calibrate --port COM3` | **[하드웨어 엔트리포인트]** 실물 Dynamixel 모터 제어 도구.<br/>- `check`: 토크를 끈 상태에서 수동 조작 관절 각도(rad) 및 부호 실시간 출력.<br/>- `calibrate`: 관절별 영점(zero tick) 및 회전 방향을 대화식으로 측정하여 `motors.json` 생성. |
+| `tests/` | `pytest tests/` | **[테스트 엔트리포인트]** 64개 단위/통합 테스트를 실행하여 비트 계산, 키프레임 안전성 및 모터 드라이버 검증. |
+
+### 2.3 디렉토리 및 세부 모듈 명세
+
+#### 1) 루트 및 환경 설정
+- [`AGENTS.md`](file:///home/borlee/assignment/pakak-tri/AGENTS.md): AI 에이전트 지침서 및 실물 하드웨어 스펙 동기화 지침 (-Y 중력축, +X 회전축, 모터 제어 게인 및 회전 부호 표준 정의).
+- [`requirements.txt`](file:///home/borlee/assignment/pakak-tri/requirements.txt): 런타임 필수 패키지 목록 (`mujoco==3.3.0`, `numpy`, `dynamixel-sdk`, `sounddevice`, `soundfile`, `pytest`).
+- [`requirements-analysis.txt`](file:///home/borlee/assignment/pakak-tri/requirements-analysis.txt): 음원/영상 안무 분석용 보조 라이브러리 (`librosa`, `matplotlib`, `opencv-python` 등).
+- [`LICENSE`](file:///home/borlee/assignment/pakak-tri/LICENSE): MIT License 오픈소스 라이선스 파일.
+
+#### 2) 로봇 기구학 및 물리 모델 (`src/`)
+- [`src/scene.xml`](file:///home/borlee/assignment/pakak-tri/src/scene.xml): 바닥면, 조명 및 물리 환경을 정의하는 MuJoCo 최상위 씬 파일 (`gravity="0 -9.81 0"`).
+- [`src/hand.xml`](file:///home/borlee/assignment/pakak-tri/src/hand.xml): 3지 다관절 로봇 손 기구학/동역학 모델. 시각 메쉬(Visual, group 1)와 충돌체(Collision, group 3)가 분리되어 자가 충돌 방지 및 고속 연산 보장.
+- `src/meshes/`: 링크(`unit.stl`) 및 손바닥 베이스(`palm.stl`) 3D CAD STL 메쉬 파일.
+- [`src/run_sim.py`](file:///home/borlee/assignment/pakak-tri/src/run_sim.py): 독립적인 관절 가동성 및 충돌 검증용 시뮬레이션 데모.
+- [`src/motors.py`](file:///home/borlee/assignment/pakak-tri/src/motors.py): ROBOTIS Protocol 2.0 기반 Dynamixel XL430-W250-T 7관절 드라이버 (GroupSyncWrite 50 Hz 제어, 속도 상한 및 페일세이프 내장).
+- `src/motors.json`: 관절별 모터 ID, 0 rad 기준 틱, 회전 방향 매핑 설정 (캘리브레이션 시 자동 생성, `.gitignore`).
+
+#### 3) 비트 동기화 안무 엔진 (`src/heartbeat/`)
+- [`src/heartbeat/play.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/play.py): 전체 시스템을 통합 구동하는 메인 오케스트레이터. 프리롤 시퀀스 실행 후 `AudioClock`과 MuJoCo/실물 모터 동기화 루프 실행.
+- [`src/heartbeat/audio.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/audio.py): 고정밀 하드웨어 마스터 오디오 클럭. PortAudio의 `outputBufferDacTime` 콜백을 추적하여 물리적 스피커 출력 시점을 역추산하는 `AudioClock` 및 무음 환경용 `SilentClock` 구현.
+- [`src/heartbeat/choreo.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/choreo.py): 음원 시각 $t$를 입력받아 7개 관절의 목표 각도(rad)를 반환하는 **상태 비저장 순수 함수 `choreo(t)`** 구현.
+- [`src/heartbeat/motions.json`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/motions.json): 안무 동작(A~E)별 키프레임 정의. 각 관절의 각도를 정규화 오므림량($-1 \sim +1$)으로 기술하여 기구학적 독립성 확보.
+- [`src/heartbeat/schedule.json`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/schedule.json): 45마디 전체 구간에 대한 동작 배정표(`sections`), 첫 박 악센트 배율(`accent_first_beat_scale`), 복귀 박 수(`outro_beats`), 프리롤 시간(`preroll_seconds`, `preroll_settle_seconds`) 정의.
+- [`src/heartbeat/schedule.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/schedule.py): `schedule.json`의 마디 구간 표를 비트 격자 수식과 결합하여 전역 타임라인(절대 시각 키프레임 배열)으로 변환.
+- [`src/heartbeat/grid.json`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/grid.json) / [`src/heartbeat/grid.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/grid.py): BPM 135, 첫 박 시각(0.42 s), 4/4 박자, 45마디 정의 및 마디·박 ↔ 음원 시각(s) 상호 변환 순수 함수 제공.
+- [`src/heartbeat/validate.py`](file:///home/borlee/assignment/pakak-tri/src/heartbeat/validate.py): 모든 키프레임과 프리롤 구간에 대해 관절 가동 범위(`safe_range`), 순간 최대 각속도(3.0 rad/s 이하), 8분음표 비트 정렬, 음원 길이 초과 여부를 사전 검증하는 자동 인터록.
+
+#### 4) 단위 및 통합 테스트 (`tests/`)
+- [`tests/test_heartbeat.py`](file:///home/borlee/assignment/pakak-tri/tests/test_heartbeat.py): 격자 변환 정밀도, `choreo(t)` 출력 범위, 시간표 문법 및 프리롤 속도 유효성을 검증하는 52개 테스트 케이스.
+- [`tests/test_motors.py`](file:///home/borlee/assignment/pakak-tri/tests/test_motors.py): 가상 시리얼 환경에서 패킷 무결성, 캘리브레이션 역산, 가동 범위 클리핑 및 안전 토크 해제를 검증하는 12개 테스트 케이스.
+
+#### 5) 기술 문서 및 레퍼런스 (`docs/`)
+- [`docs/execution_guide.md`](file:///home/borlee/assignment/pakak-tri/docs/execution_guide.md): 전체 시스템 아키텍처, 스크립트 실행 방법 및 트러블슈팅 종합 가이드 (본 문서).
+- [`docs/heartbeat/choreography.md`](file:///home/borlee/assignment/pakak-tri/docs/heartbeat/choreography.md): 원본 안무 영상(2PM - Heartbeat) 분석 데이터 및 손동작 매핑 근거.
+- [`docs/heartbeat/brainstorming.md`](file:///home/borlee/assignment/pakak-tri/docs/heartbeat/brainstorming.md): 프로젝트 배경 및 기술적 제약 사항.
+- [`docs/heartbeat/implementation-plan.md`](file:///home/borlee/assignment/pakak-tri/docs/heartbeat/implementation-plan.md): 단계별 구현 계획 및 검증 기록.
 
 ---
 
